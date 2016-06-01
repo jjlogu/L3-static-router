@@ -72,42 +72,56 @@ void sr_handlepacket(struct sr_instance* sr,
         unsigned int len,
         char* interface/* lent */)
 {
-    struct sr_ethernet_hdr* e_hdr = 0;
+    sr_ethernet_hdr_t* e_hdr = 0;
  
     /* REQUIRES */
     assert(sr);
     assert(packet);
     assert(interface);
  
-    if(len < sizeof(struct sr_ethernet_hdr)){
+    if(len < sizeof(sr_ethernet_hdr_t)){
         fprintf(stderr, "Invalid ethernet frame header length\n");
         return;
     }
  
-    e_hdr = (struct sr_ethernet_hdr*)packet;
+    e_hdr = (sr_ethernet_hdr_t*)packet;
 
 	/* Handle IP */
     if ( e_hdr->ether_type == htons(ethertype_ip) ) {
+		sr_ip_hdr_t* ip_hdr = 0;
+		uint16_t checksum = 0x0000;
+
+		if( len < sizeof(sr_ethernet_hdr_t) + sizeof(sr_ip_hdr_t) ) {
+			fprintf(stderr,"Invalid IP packet length\n");
+			return;
+		}
+		ip_hdr=(sr_ip_hdr_t*)(packet+sizeof(sr_ethernet_hdr_t));		
+		checksum=ip_hdr->ip_sum;
+		ip_hdr->ip_sum=0x0000; /* for recalculate checksum */
+		if(checksum != cksum(ip_hdr,ip_hdr->ip_hl*4)) {
+			fprintf(stderr,"Invalid checksum: Expected:%04X  Calculated:%04X\n",checksum,cksum(ip_hdr,ip_hdr->ip_hl*4));
+		return;
+		}
 		fprintf(stderr,"IP packet received\n");	
 		print_hdrs(packet,len);
 	} /* end Handle IP */
 	/* Handle ARP */
     else if ( e_hdr->ether_type == htons(ethertype_arp) ) {
-    	struct sr_arp_hdr*      a_hdr = 0;
+    	sr_arp_hdr_t* a_hdr = 0;
     	struct sr_if* if_walker = 0;
 
-		if( len < sizeof(struct sr_ethernet_hdr) + sizeof(struct sr_arp_hdr) ) {
+		if( len < sizeof(sr_ethernet_hdr_t) + sizeof(sr_arp_hdr_t) ) {
 			fprintf(stderr, "Invalid ARP header length\n");
 			return;
 		}
-		a_hdr=(struct sr_arp_hdr*)(packet+sizeof(struct sr_ethernet_hdr));
+		a_hdr=(sr_arp_hdr_t*)(packet+sizeof(sr_ethernet_hdr_t));
         /* Handle ARP request */
         if( a_hdr->ar_op == htons(arp_op_request) ) {
             /* if ARP request is for one of router's interface, send ARP reply*/
             if_walker = sr->if_list;
             while(if_walker) {
                 if(if_walker->ip == a_hdr->ar_tip) {
-                    uint8_t* buf;
+					uint8_t* buf;
                     buf=(uint8_t *)malloc(len);
                     assert(buf);
                     memcpy(e_hdr->ether_dhost,e_hdr->ether_shost,ETHER_ADDR_LEN);
