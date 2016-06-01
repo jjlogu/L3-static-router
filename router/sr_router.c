@@ -13,7 +13,8 @@
 
 #include <stdio.h>
 #include <assert.h>
-
+#include <stdlib.h>
+#include <string.h>
 
 #include "sr_if.h"
 #include "sr_rt.h"
@@ -71,14 +72,52 @@ void sr_handlepacket(struct sr_instance* sr,
         unsigned int len,
         char* interface/* lent */)
 {
-  /* REQUIRES */
-  assert(sr);
-  assert(packet);
-  assert(interface);
-
-  printf("*** -> Received packet of length %d \n",len);
-
-  /* fill in code here */
-
+	struct sr_ethernet_hdr* e_hdr = 0;
+        struct sr_arp_hdr*      a_hdr = 0;
+        struct sr_if* if_walker = 0;
+ 
+        /* REQUIRES */
+        assert(sr);
+        assert(packet);
+        assert(interface);
+ 
+        if(len < sizeof(struct sr_ethernet_hdr) + sizeof(struct sr_arp_hdr)) {
+                fprintf(stderr, "Invalid packet header length\n");
+                return;
+        }
+        printf("*** -> Received packet of length %d \n",len);
+ 
+        e_hdr = (struct sr_ethernet_hdr*)packet;
+        a_hdr = (struct sr_arp_hdr*)(packet + sizeof(struct sr_ethernet_hdr));
+ 
+	/* Handle ARP request */
+        if ( (e_hdr->ether_type == htons(ethertype_arp)) && (a_hdr->ar_op == htons(arp_op_request)) ) {
+		/* if ARP request is for one of router's interface, send ARP reply*/
+                if_walker = sr->if_list;
+                while(if_walker) {
+                        if(if_walker->ip == a_hdr->ar_tip) {
+				uint8_t* buf;
+				buf=(uint8_t *)malloc(len);
+				assert(buf);
+				memcpy(e_hdr->ether_dhost,e_hdr->ether_shost,ETHER_ADDR_LEN);
+				memcpy(e_hdr->ether_shost,if_walker->addr,ETHER_ADDR_LEN);
+				a_hdr->ar_op = htons(arp_op_reply);
+				a_hdr->ar_tip = a_hdr->ar_sip;
+				memcpy(a_hdr->ar_tha,a_hdr->ar_sha,ETHER_ADDR_LEN);
+				memcpy(a_hdr->ar_sha,if_walker->addr,ETHER_ADDR_LEN);
+				a_hdr->ar_sip = if_walker->ip;
+				memcpy(buf,(uint8_t*)packet,len);
+				sr_send_packet(sr,buf,len,interface);
+				sr_arpcache_insert(&sr->cache,a_hdr->ar_tha,a_hdr->ar_tip);
+				print_hdrs(buf,len);
+				free(buf);	
+				
+				/* Print ARP cache */
+				/* sr_arpcache_dump(&sr->cache); */
+				break;
+                        }
+                        if_walker = if_walker->next;
+                }
+        }
 }/* end sr_ForwardPacket */
 
