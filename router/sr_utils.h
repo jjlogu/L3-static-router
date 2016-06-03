@@ -45,4 +45,13 @@ void print_hdr_arp(uint8_t *buf);
 /* prints all headers, starting from eth */
 void print_hdrs(uint8_t *buf, uint32_t length);
 
+/*
+    This function will check whether give ip matched any of router's interface ip.
+    If match:
+        return pointer to interface
+    else:
+        return null
+*/
+struct sr_if* is_ip_match_router_if(struct sr_instance* sr, uint32_t ip);
+
 #endif /* -- SR_UTILS_H -- */

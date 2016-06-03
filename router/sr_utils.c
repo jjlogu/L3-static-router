@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <string.h>
 #include "sr_protocol.h"
+#include "sr_router.h"
 #include "sr_utils.h"
 
 
@@ -115,7 +116,7 @@ void print_hdr_icmp(uint8_t *buf) {
   fprintf(stderr, "\ttype: %d\n", icmp_hdr->icmp_type);
   fprintf(stderr, "\tcode: %d\n", icmp_hdr->icmp_code);
   /* Keep checksum in NBO */
-  fprintf(stderr, "\tchecksum: %d\n", icmp_hdr->icmp_sum);
+  fprintf(stderr, "\tchecksum[NBO]: 0x%04X\n", icmp_hdr->icmp_sum);
 }
 
 
@@ -183,3 +184,11 @@ void print_hdrs(uint8_t *buf, uint32_t length) {
   }
 }
 
+struct sr_if* is_ip_match_router_if(struct sr_instance* sr, uint32_t ip) {
+	struct sr_if* if_walker = sr->if_list;
+	while(if_walker) {
+		if(ip == if_walker->ip)
+			return if_walker;
+	}
+	return if_walker;
+}
