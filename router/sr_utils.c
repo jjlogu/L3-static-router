@@ -189,6 +189,7 @@ struct sr_if* is_ip_match_router_if(struct sr_instance* sr, uint32_t ip) {
 	while(if_walker) {
 		if(ip == if_walker->ip)
 			return if_walker;
+		if_walker = if_walker->next;
 	}
 	return if_walker;
 }
