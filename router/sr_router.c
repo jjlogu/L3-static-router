@@ -125,6 +125,7 @@ void sr_handlepacket(struct sr_instance* sr,
 		            return;
         		}
 				if(0x0008 == icmp_hdr->icmp_type){
+ 					unsigned char t_ether_addr[ETHER_ADDR_LEN];
 					/* Prepare ICMP reply */
 					icmp_hdr->icmp_sum = 0x0000; /* for recalculate checksum */
 					icmp_hdr->icmp_type = 0x0000;
@@ -138,12 +139,14 @@ void sr_handlepacket(struct sr_instance* sr,
 			        ip_hdr->ip_sum = cksum(ip_hdr,ip_hdr->ip_hl*4); /* recalculate checksum */
 
 					/* Prepare Ethernet packet */
+					memcpy(t_ether_addr,e_hdr->ether_dhost,ETHER_ADDR_LEN);
 					memcpy(e_hdr->ether_dhost,e_hdr->ether_shost,ETHER_ADDR_LEN);
-			    	memcpy(e_hdr->ether_shost,if_match->addr,ETHER_ADDR_LEN);
+			    	memcpy(e_hdr->ether_shost,t_ether_addr,ETHER_ADDR_LEN);
 
 					/* Send on wire */
                 	sr_send_packet(sr,packet,len,interface);
-					fprintf(stderr,"ICMP reply has been sent!\n");
+					fprintf(stderr,"ICMP reply has been sent to ");
+					print_addr_ip_int(ntohl(ip_hdr->ip_dst));
 					return;
 				} 
 				else
