@@ -21,6 +21,7 @@
 
 #include "sr_rt.h"
 #include "sr_router.h"
+#include "sr_utils.h"
 
 /*---------------------------------------------------------------------
  * Method:
@@ -176,3 +177,16 @@ void sr_print_routing_entry(struct sr_rt* entry)
     printf("%s\n",entry->interface);
 
 } /* -- sr_print_routing_entry -- */
+
+/*
+	Search through the routing table for longest IP match
+*/
+struct sr_rt* sr_get_longest_rt_table_match(struct sr_rt* rt_walker,in_addr_t ip) {
+	fprintf(stderr,"TODO: implement longest prefix\n");
+	while(rt_walker) {
+		if(rt_walker->dest.s_addr == ip)
+			return rt_walker;
+		rt_walker = rt_walker->next;
+	}
+	return rt_walker;
+}

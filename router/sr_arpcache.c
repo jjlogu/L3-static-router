@@ -17,9 +17,28 @@
   See the comments in the header file for an idea of what it should look like.
 */
 void sr_arpcache_sweepreqs(struct sr_instance *sr) { 
-    /* Fill this in */
+	struct sr_arpreq* req = sr->cache.requests;
+	while(req) {
+		sr_handle_arpreq(sr,req);
+		req=req->next;
+	}
 }
 
+void sr_handle_arpreq(struct sr_instance* sr /* borrowed */,
+			struct sr_arpreq* req /* borrowed */) {
+	time_t now = time(NULL);
+	if( 1.0 < difftime(now,req->sent) ) {
+		if( 5 <= req->times_sent ) {
+			fprintf(stderr,"TODO: send ICMP host not reachable\n");
+			sr_arpreq_destroy(&sr->cache,req);
+		}
+		else {
+			sr_send_packet(sr,req->packets->buf,req->packets->len,req->packets->iface);
+			req->sent = time(NULL);
+			req->times_sent++;
+		}
+	}
+}
 /* You should not need to touch the rest of this code. */
 
 /* Checks if an IP->MAC mapping is in the cache. IP is in network byte order.

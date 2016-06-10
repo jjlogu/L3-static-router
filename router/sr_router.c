@@ -98,17 +98,17 @@ void sr_handlepacket(struct sr_instance* sr,
 			fprintf(stderr,"Invalid IP packet length\n");
 			return;
 		}
-		checksum=ip_hdr->ip_sum;
-		ip_hdr->ip_sum=0x0000; /* for recalculate checksum */
-		ip_hdr->ip_sum=cksum(ip_hdr,ip_hdr->ip_hl*4); /* recalculate checksum */
+		checksum = ip_hdr->ip_sum;
+		ip_hdr->ip_sum = 0x0000; /* for recalculate checksum */
+		ip_hdr->ip_sum = cksum(ip_hdr,ip_hdr->ip_hl*4); /* recalculate checksum */
 		if(checksum != ip_hdr->ip_sum) {
 			fprintf(stderr,"Invalid IP checksum: Expected:%04X  Calculated:%04X\n",checksum,ip_hdr->ip_sum);
 			return;
 		}
-		/* Handle ICMP */
-		if(ip_hdr->ip_p == ip_protocol_icmp) {
-			if_match = is_ip_match_router_if(sr,ip_hdr->ip_dst);	
-			if(if_match) {
+		if_match = is_ip_match_router_if(sr,ip_hdr->ip_dst);	
+		if(if_match) { /* packet is for router */
+			/* Handle ICMP */
+			if(ip_hdr->ip_p == ip_protocol_icmp) {
 				sr_icmp_hdr_t* icmp_hdr = (sr_icmp_hdr_t*)(packet+minlen);
 				minlen += sizeof(sr_icmp_hdr_t);
 
@@ -117,7 +117,7 @@ void sr_handlepacket(struct sr_instance* sr,
          			fprintf(stderr,"Invalid ICMP packet length\n");
 		            return;
         		}
-				checksum=icmp_hdr->icmp_sum;
+				checksum = icmp_hdr->icmp_sum;
 				icmp_hdr->icmp_sum = 0x0000; /* for recalculate checksum */
 				icmp_hdr->icmp_sum = cksum(icmp_hdr,len-(sizeof(sr_ethernet_hdr_t)+(ip_hdr->ip_hl*4))); /* recalculate checksum */
 				if(checksum != icmp_hdr->icmp_sum) {
@@ -149,13 +149,72 @@ void sr_handlepacket(struct sr_instance* sr,
 					print_addr_ip_int(ntohl(ip_hdr->ip_dst));
 					return;
 				} 
-				else
-					fprintf(stderr, "To-Do: send destination not reachable \n");
 			}
-			else
-				fprintf(stderr, "ICMP is not for router\n");
-		} else
-			fprintf(stderr,"IP packet received\n");	
+			else if(ip_hdr->ip_p == ip_protocol_tcp || ip_hdr->ip_p == ip_protocol_udp) {
+				fprintf(stderr, "TODO: send ICMP Port unreachable (type 3, code 3)\n");
+			}
+			fprintf(stderr, "TODO: send ICMP destination not reachable(Protocol unreachable error.) Type-3 Code-2\n");
+		} else { /* packet is not for router */
+			struct sr_rt* rt_match = sr_get_longest_rt_table_match(sr->routing_table,ip_hdr->ip_dst);
+			if(rt_match) {
+				struct sr_arpentry* entry = 0;
+				struct sr_if* if_to_send = sr_get_interface(sr,rt_match->interface);
+
+				fprintf(stderr,"IP packet received for forward\n");	
+				ip_hdr->ip_ttl = ntohs(ip_hdr->ip_ttl) - 1;
+				if(0 < ip_hdr->ip_ttl) {
+					ip_hdr->ip_ttl = htons(ip_hdr->ip_ttl);
+					ip_hdr->ip_sum = 0x0000; /* for recalculate checksum */	
+					entry = sr_arpcache_lookup(&sr->cache, ip_hdr->ip_dst);
+					if(entry) {
+						/* Update Ethernet header */
+						memcpy(e_hdr->ether_shost,if_to_send->addr,ETHER_ADDR_LEN);
+						memcpy(e_hdr->ether_dhost,entry->mac,ETHER_ADDR_LEN);
+
+						ip_hdr->ip_dst = entry->ip;
+						ip_hdr->ip_sum = cksum(ip_hdr,ip_hdr->ip_hl*4); /* recalculate checksum */
+						sr_send_packet(sr, packet, len, rt_match->interface);
+						/* sr_arpcache_dump(&sr->cache); */
+						free(entry);
+						return;
+					}
+					else {
+						/* Send a ARP request */
+						uint8_t* buf = (uint8_t*)malloc(sizeof(sr_ethernet_hdr_t)+sizeof(sr_arp_hdr_t));
+						struct sr_arpreq* req = 0;
+						assert(buf);
+						sr_ethernet_hdr_t* eth_hdr= (sr_ethernet_hdr_t*)buf;
+						sr_arp_hdr_t* arp_req = (sr_arp_hdr_t*)(buf+sizeof(sr_ethernet_hdr_t));
+
+						/* Prepare Ethernet Header */
+						memset(eth_hdr->ether_dhost,0xff,ETHER_ADDR_LEN);
+						memcpy(eth_hdr->ether_shost,if_to_send->addr,ETHER_ADDR_LEN);
+						eth_hdr->ether_type = htons(ethertype_arp);
+						
+						/* Prepare ARP request */
+						arp_req->ar_hrd = htons(arp_hrd_ethernet);
+						arp_req->ar_pro = htons(ethertype_ip);
+						arp_req->ar_hln = ETHER_ADDR_LEN;
+						arp_req->ar_pln = 0x04;
+						arp_req->ar_op = htons(arp_op_request);
+						memcpy(arp_req->ar_sha,if_to_send->addr,ETHER_ADDR_LEN);
+						arp_req->ar_sip = if_to_send->ip;
+						memset(arp_req->ar_tha,0xff,ETHER_ADDR_LEN);
+						arp_req->ar_tip = ip_hdr->ip_dst;
+					
+						req = sr_arpcache_queuereq(&sr->cache,ip_hdr->ip_dst,buf,sizeof(sr_ethernet_hdr_t)+sizeof(sr_arp_hdr_t),rt_match->interface); 
+						sr_handle_arpreq(sr,req);
+						free(buf);	
+						return;
+					}
+				} else {
+					fprintf(stderr,"TODO: send ICMP Time exceeded (type 11, code 0)\n");
+				}
+			}
+			else {
+				fprintf(stderr,"TODO: send ICMP Destination net not reachable(Type-3, Code-0)\n");
+			}
+		}
 
 		fprintf(stderr,"len = %d\n",len);
 		print_hdrs(packet,len);
@@ -174,6 +233,7 @@ void sr_handlepacket(struct sr_instance* sr,
             /* if ARP request is for one of router's interface, send ARP reply*/
             if_match = is_ip_match_router_if(sr, a_hdr->ar_tip);
             if(if_match) {
+				/* Send ARP reply */
 				uint8_t* buf;
                 buf=(uint8_t *)malloc(len);
                 assert(buf);
@@ -186,14 +246,44 @@ void sr_handlepacket(struct sr_instance* sr,
                 a_hdr->ar_sip = if_match->ip;
                 memcpy(buf,(uint8_t*)packet,len);
                 sr_send_packet(sr,buf,len,interface);
-                sr_arpcache_insert(&sr->cache,a_hdr->ar_tha,a_hdr->ar_tip);
+                sr_arpcache_insert(&sr->cache,a_hdr->ar_tha,a_hdr->ar_tip); 
                 free(buf);  
             }
             else {
-                fprintf(stderr,"ARP request detail: ");
+                fprintf(stderr,"ARP request detail:\n");
                 print_hdrs(packet,len);
             }
         }/* end Handle ARP request */
+		else if( a_hdr->ar_op == htons(arp_op_reply) ) { /* Handle ARP reply */
+			unsigned char broadcast_adr[ETHER_ADDR_LEN];
+			struct sr_arpreq* req = 0; 
+			memset(broadcast_adr,0xff,ETHER_ADDR_LEN);
+			if(0 == memcmp(a_hdr->ar_tha,broadcast_adr,ETHER_ADDR_LEN)) {
+				fprintf(stderr,"Hacky!! Source MAC is broadcast address on ARP reply (o_O)\n");
+				return;
+			}
+			if(0 == a_hdr->ar_sip) {
+				fprintf(stderr,"Invalid source IP in ARP reply (o_O)\n");
+				return;
+			}
+			/* Not verifying the target IP */
+			req = sr_arpcache_insert(&sr->cache,a_hdr->ar_sha,a_hdr->ar_sip);
+			fprintf(stderr,"ARP cache updated for ");
+			print_addr_eth(a_hdr->ar_sha);
+			fprintf(stderr," <-> ");
+			print_addr_ip_int(ntohl(a_hdr->ar_sip));
+			fprintf(stderr,"\n");
+			
+			if(NULL != req) {
+				/* Send all packets waiting in queue */
+				while(req->packets) {
+					memcpy(((sr_ethernet_hdr_t*)req->packets->buf)->ether_dhost,a_hdr->ar_sha,ETHER_ADDR_LEN);
+					sr_send_packet(sr,req->packets->buf,req->packets->len,req->packets->iface);
+					req->packets = req->packets->next;
+				}
+				sr_arpreq_destroy(&sr->cache, req);
+			}
+		}
     }/* end Handle ARP */
 }/* end sr_ForwardPacket */
 
