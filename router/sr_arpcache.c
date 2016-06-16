@@ -6,10 +6,12 @@
 #include <pthread.h>
 #include <sched.h>
 #include <string.h>
+#include <assert.h>
 #include "sr_arpcache.h"
 #include "sr_router.h"
 #include "sr_if.h"
 #include "sr_protocol.h"
+#include "sr_utils.h"
 
 /* 
   This function gets called every second. For each request sent out, we keep
@@ -27,13 +29,44 @@ void sr_arpcache_sweepreqs(struct sr_instance *sr) {
 void sr_handle_arpreq(struct sr_instance* sr /* borrowed */,
 			struct sr_arpreq* req /* borrowed */) {
 	time_t now = time(NULL);
-	if( 1.0 < difftime(now,req->sent) ) {
+	if( 1.0 <= difftime(now,req->sent) ) {
 		if( 5 <= req->times_sent ) {
-			fprintf(stderr,"TODO: send ICMP host not reachable\n");
+			/*unsigned int len = sizeof(sr_ethernet_hdr_t)+sizeof(sr_ip_hdr_t)+sizeof(sr_icmp_t3_hdr_t);
+			uint8_t* buf = (uint8_t*)malloc(len);
+			assert(buf);
+			prepare_icmp_t3_hdr((sr_icmp_t3_hdr_t*)(buf+(len-sizeof(sr_icmp_t3_hdr_t)), );*/	
+			fprintf(stderr,"TODO: send ICMP host not reachable (type 3, code 1)\n");
 			sr_arpreq_destroy(&sr->cache,req);
 		}
 		else {
-			sr_send_packet(sr,req->packets->buf,req->packets->len,req->packets->iface);
+			/* Send a ARP request */
+			unsigned int len = sizeof(sr_ethernet_hdr_t)+sizeof(sr_arp_hdr_t);
+            uint8_t* buf = (uint8_t*)malloc(len);
+			struct sr_if* if_to_send = sr_get_interface(sr,req->packets->iface);
+
+			assert(buf);
+            sr_ethernet_hdr_t* eth_hdr = (sr_ethernet_hdr_t*)buf;
+            sr_arp_hdr_t* arp_req = (sr_arp_hdr_t*)(buf+sizeof(sr_ethernet_hdr_t));
+
+            /* Prepare Ethernet Header */
+            memset(eth_hdr->ether_dhost,0xff,ETHER_ADDR_LEN);
+            memcpy(eth_hdr->ether_shost,if_to_send->addr,ETHER_ADDR_LEN);
+            eth_hdr->ether_type = htons(ethertype_arp);
+
+            /* Prepare ARP request */
+            arp_req->ar_hrd = htons(arp_hrd_ethernet);
+            arp_req->ar_pro = htons(ethertype_ip);
+            arp_req->ar_hln = ETHER_ADDR_LEN;
+            arp_req->ar_pln = 0x04;
+            arp_req->ar_op = htons(arp_op_request);
+            memcpy(arp_req->ar_sha,if_to_send->addr,ETHER_ADDR_LEN);
+            arp_req->ar_sip = if_to_send->ip;
+            memset(arp_req->ar_tha,0xff,ETHER_ADDR_LEN);
+            arp_req->ar_tip = req->ip;
+			fprintf(stderr, "Sending ARP request\n");
+			sr_send_packet(sr,buf,len,if_to_send->name);
+			free(buf);
+
 			req->sent = time(NULL);
 			req->times_sent++;
 		}

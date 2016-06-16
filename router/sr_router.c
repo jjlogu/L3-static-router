@@ -85,6 +85,11 @@ void sr_handlepacket(struct sr_instance* sr,
         fprintf(stderr, "Invalid ethernet frame header length\n");
         return;
     }
+#ifdef MYDEBUG
+	fprintf(stderr,"++++++++++++++++++ Received a Packet ++++++++++++++++++\n");
+    print_hdrs(packet,len);
+	fprintf(stderr,"+++++++++++++++++++++++++++++++++++++++++++++++++++++++\n");
+#endif
  
     e_hdr = (sr_ethernet_hdr_t*)packet;
 
@@ -161,51 +166,28 @@ void sr_handlepacket(struct sr_instance* sr,
 				struct sr_if* if_to_send = sr_get_interface(sr,rt_match->interface);
 
 				fprintf(stderr,"IP packet received for forward\n");	
-				ip_hdr->ip_ttl = ntohs(ip_hdr->ip_ttl) - 1;
+				ip_hdr->ip_ttl = ip_hdr->ip_ttl - 1;
 				if(0 < ip_hdr->ip_ttl) {
-					ip_hdr->ip_ttl = htons(ip_hdr->ip_ttl);
+					ip_hdr->ip_ttl = ip_hdr->ip_ttl;
 					ip_hdr->ip_sum = 0x0000; /* for recalculate checksum */	
+					ip_hdr->ip_sum = cksum(ip_hdr,ip_hdr->ip_hl*4); /* recalculate checksum */
+
 					entry = sr_arpcache_lookup(&sr->cache, ip_hdr->ip_dst);
 					if(entry) {
 						/* Update Ethernet header */
 						memcpy(e_hdr->ether_shost,if_to_send->addr,ETHER_ADDR_LEN);
 						memcpy(e_hdr->ether_dhost,entry->mac,ETHER_ADDR_LEN);
 
-						ip_hdr->ip_dst = entry->ip;
-						ip_hdr->ip_sum = cksum(ip_hdr,ip_hdr->ip_hl*4); /* recalculate checksum */
 						sr_send_packet(sr, packet, len, rt_match->interface);
 						/* sr_arpcache_dump(&sr->cache); */
 						free(entry);
 						return;
 					}
 					else {
-						/* Send a ARP request */
-						uint8_t* buf = (uint8_t*)malloc(sizeof(sr_ethernet_hdr_t)+sizeof(sr_arp_hdr_t));
 						struct sr_arpreq* req = 0;
-						assert(buf);
-						sr_ethernet_hdr_t* eth_hdr= (sr_ethernet_hdr_t*)buf;
-						sr_arp_hdr_t* arp_req = (sr_arp_hdr_t*)(buf+sizeof(sr_ethernet_hdr_t));
-
-						/* Prepare Ethernet Header */
-						memset(eth_hdr->ether_dhost,0xff,ETHER_ADDR_LEN);
-						memcpy(eth_hdr->ether_shost,if_to_send->addr,ETHER_ADDR_LEN);
-						eth_hdr->ether_type = htons(ethertype_arp);
-						
-						/* Prepare ARP request */
-						arp_req->ar_hrd = htons(arp_hrd_ethernet);
-						arp_req->ar_pro = htons(ethertype_ip);
-						arp_req->ar_hln = ETHER_ADDR_LEN;
-						arp_req->ar_pln = 0x04;
-						arp_req->ar_op = htons(arp_op_request);
-						memcpy(arp_req->ar_sha,if_to_send->addr,ETHER_ADDR_LEN);
-						arp_req->ar_sip = if_to_send->ip;
-						memset(arp_req->ar_tha,0xff,ETHER_ADDR_LEN);
-						arp_req->ar_tip = ip_hdr->ip_dst;
-					
-						req = sr_arpcache_queuereq(&sr->cache,ip_hdr->ip_dst,buf,sizeof(sr_ethernet_hdr_t)+sizeof(sr_arp_hdr_t),rt_match->interface); 
+						fprintf(stderr,"Calling sr_arpcache_queuereq\n");
+						req = sr_arpcache_queuereq(&sr->cache,ip_hdr->ip_dst,packet,len,rt_match->interface); 
 						sr_handle_arpreq(sr,req);
-						free(buf);	
-						return;
 					}
 				} else {
 					fprintf(stderr,"TODO: send ICMP Time exceeded (type 11, code 0)\n");
@@ -216,8 +198,8 @@ void sr_handlepacket(struct sr_instance* sr,
 			}
 		}
 
-		fprintf(stderr,"len = %d\n",len);
-		print_hdrs(packet,len);
+		/* fprintf(stderr,"len = %d\n",len);
+		print_hdrs(packet,len); */
 	} /* end Handle IP */
 	/* Handle ARP */
     else if ( e_hdr->ether_type == htons(ethertype_arp) ) {
@@ -230,7 +212,7 @@ void sr_handlepacket(struct sr_instance* sr,
 		a_hdr=(sr_arp_hdr_t*)(packet+sizeof(sr_ethernet_hdr_t));
         /* Handle ARP request */
         if( a_hdr->ar_op == htons(arp_op_request) ) {
-            /* if ARP request is for one of router's interface, send ARP reply*/
+            /* if ARP request is for one of router's interface, send ARP reply */
             if_match = is_ip_match_router_if(sr, a_hdr->ar_tip);
             if(if_match) {
 				/* Send ARP reply */
@@ -247,6 +229,13 @@ void sr_handlepacket(struct sr_instance* sr,
                 memcpy(buf,(uint8_t*)packet,len);
                 sr_send_packet(sr,buf,len,interface);
                 sr_arpcache_insert(&sr->cache,a_hdr->ar_tha,a_hdr->ar_tip); 
+
+#ifdef MYDEBUG
+				fprintf(stderr,"++++++++++++++++++ Sending ARP reply ++++++++++++++++++\n");
+			    print_hdrs(buf,len);
+				fprintf(stderr,"+++++++++++++++++++++++++++++++++++++++++++++++++++++++\n");
+#endif
+
                 free(buf);  
             }
             else {
@@ -277,7 +266,13 @@ void sr_handlepacket(struct sr_instance* sr,
 			if(NULL != req) {
 				/* Send all packets waiting in queue */
 				while(req->packets) {
+					fprintf(stderr,"SEND WAITING PACKETS\n");
+
 					memcpy(((sr_ethernet_hdr_t*)req->packets->buf)->ether_dhost,a_hdr->ar_sha,ETHER_ADDR_LEN);
+					memcpy(((sr_ethernet_hdr_t*)req->packets->buf)->ether_shost,a_hdr->ar_tha,ETHER_ADDR_LEN);
+#ifdef MYDEBUG
+					print_hdrs(req->packets->buf,req->packets->len);
+#endif
 					sr_send_packet(sr,req->packets->buf,req->packets->len,req->packets->iface);
 					req->packets = req->packets->next;
 				}
