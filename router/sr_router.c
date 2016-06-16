@@ -152,6 +152,7 @@ void sr_handlepacket(struct sr_instance* sr,
                 	sr_send_packet(sr,packet,len,interface);
 					fprintf(stderr,"ICMP reply has been sent to ");
 					print_addr_ip_int(ntohl(ip_hdr->ip_dst));
+
 					return;
 				} 
 			}

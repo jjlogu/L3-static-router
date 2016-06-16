@@ -10,6 +10,7 @@
 #include "sr_arpcache.h"
 #include "sr_router.h"
 #include "sr_if.h"
+#include "sr_rt.h"
 #include "sr_protocol.h"
 #include "sr_utils.h"
 
@@ -31,11 +32,34 @@ void sr_handle_arpreq(struct sr_instance* sr /* borrowed */,
 	time_t now = time(NULL);
 	if( 1.0 <= difftime(now,req->sent) ) {
 		if( 5 <= req->times_sent ) {
-			/*unsigned int len = sizeof(sr_ethernet_hdr_t)+sizeof(sr_ip_hdr_t)+sizeof(sr_icmp_t3_hdr_t);
+			unsigned int len = sizeof(sr_ethernet_hdr_t)+sizeof(sr_ip_hdr_t)+sizeof(sr_icmp_t3_hdr_t);
 			uint8_t* buf = (uint8_t*)malloc(len);
+			struct sr_rt* rt_match = 0;
+			sr_ip_hdr_t* ip_hdr = 0;
+			sr_ethernet_hdr_t* eth_hdr = 0;
+			struct sr_if* if_to_send = 0;
+
 			assert(buf);
-			prepare_icmp_t3_hdr((sr_icmp_t3_hdr_t*)(buf+(len-sizeof(sr_icmp_t3_hdr_t)), );*/	
-			fprintf(stderr,"TODO: send ICMP host not reachable (type 3, code 1)\n");
+
+			while(req->packets) {
+				ip_hdr = (sr_ip_hdr_t*)(req->packets->buf+sizeof(sr_ethernet_hdr_t));
+				eth_hdr = (sr_ethernet_hdr_t*)(req->packets->buf);
+				rt_match = sr_get_longest_rt_table_match(sr->routing_table,ip_hdr->ip_src);
+
+				if(rt_match) {
+					if_to_send = sr_get_interface(sr,rt_match->interface);
+					prepare_icmp_t3_hdr( (sr_icmp_t3_hdr_t*)( buf+(len-sizeof(sr_icmp_t3_hdr_t)) ), 0x03 /* type */, 0x01/* code */, ip_hdr );
+					/* Note: Not looking at rt_table for mac, just reusing mac->IP from existing queued packet */
+					prepare_ipv4_hdr((sr_ip_hdr_t*)(buf+sizeof(sr_ethernet_hdr_t)),0x00 /* TOS */, len-sizeof(sr_ethernet_hdr_t), 0x0000 /* ID */, IP_DF /* offset */, ip_protocol_icmp /* protocol */, ntohl(if_to_send->ip) /* source */ ,ntohl(ip_hdr->ip_src) /* destination */);
+					prepare_eth_hdr((sr_ethernet_hdr_t*)buf, eth_hdr->ether_shost /* destination */, if_to_send->addr /* sender */, ethertype_ip);
+					
+					print_hdrs(buf,len);
+					sr_send_packet(sr,buf,len,rt_match->interface);
+				}
+				req->packets = req->packets->next;
+			}
+			free(buf);
+			fprintf(stderr,"Sent ICMP host not reachable (type 3, code 1)\n");
 			sr_arpreq_destroy(&sr->cache,req);
 		}
 		else {

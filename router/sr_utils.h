@@ -54,4 +54,13 @@ void print_hdrs(uint8_t *buf, uint32_t length);
 */
 struct sr_if* is_ip_match_router_if(struct sr_instance* sr, uint32_t ip);
 
+void prepare_icmp_t3_hdr(sr_icmp_t3_hdr_t* icmp_hdr, /* Borrowed */
+             uint8_t icmp_type, uint8_t icmp_code, sr_ip_hdr_t* data);
+void prepare_ipv4_hdr(sr_ip_hdr_t* ip_hdr, /* Borrowed */
+            uint8_t ip_tos, uint16_t ip_len, uint16_t ip_id,
+            uint16_t ip_off, uint8_t ip_p, uint32_t ip_src,
+            uint32_t ip_dst);
+void prepare_eth_hdr(sr_ethernet_hdr_t* eth_hdr,/* Borrowed */
+                    uint8_t* ether_dhost, uint8_t* ether_shost,
+                    uint16_t ether_type);
 #endif /* -- SR_UTILS_H -- */
