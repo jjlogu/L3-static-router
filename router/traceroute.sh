@@ -8,5 +8,5 @@ then
   exit $E_BADARGS
 fi
 
-traceroute -p 33000 -w 1 -n $@
+tracepath -p 33000 -w 1 -n $@
 

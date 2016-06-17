@@ -53,7 +53,6 @@ void sr_handle_arpreq(struct sr_instance* sr /* borrowed */,
 					prepare_ipv4_hdr((sr_ip_hdr_t*)(buf+sizeof(sr_ethernet_hdr_t)),0x00 /* TOS */, len-sizeof(sr_ethernet_hdr_t), 0x0000 /* ID */, IP_DF /* offset */, ip_protocol_icmp /* protocol */, ntohl(if_to_send->ip) /* source */ ,ntohl(ip_hdr->ip_src) /* destination */);
 					prepare_eth_hdr((sr_ethernet_hdr_t*)buf, eth_hdr->ether_shost /* destination */, if_to_send->addr /* sender */, ethertype_ip);
 					
-					print_hdrs(buf,len);
 					sr_send_packet(sr,buf,len,rt_match->interface);
 				}
 				req->packets = req->packets->next;

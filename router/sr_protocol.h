@@ -100,6 +100,7 @@ struct sr_icmp_t3_hdr {
 
 } __attribute__ ((packed)) ;
 typedef struct sr_icmp_t3_hdr sr_icmp_t3_hdr_t;
+typedef struct sr_icmp_t3_hdr sr_icmp_t11_hdr_t;
 
 
 

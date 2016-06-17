@@ -157,9 +157,37 @@ void sr_handlepacket(struct sr_instance* sr,
 				} 
 			}
 			else if(ip_hdr->ip_p == ip_protocol_tcp || ip_hdr->ip_p == ip_protocol_udp) {
-				fprintf(stderr, "TODO: send ICMP Port unreachable (type 3, code 3)\n");
+				unsigned int len = sizeof(sr_ethernet_hdr_t)+sizeof(sr_ip_hdr_t)+sizeof(sr_icmp_t3_hdr_t);
+                struct sr_if* if_to_send = sr_get_interface(sr,interface);
+                uint8_t* buf = (uint8_t*)malloc(len);
+                assert(buf);
+
+                prepare_icmp_t3_hdr( (sr_icmp_t3_hdr_t*)( buf+(len-sizeof(sr_icmp_t3_hdr_t)) ), 0x03 /* type */, 0x03/* code */, ip_hdr );
+                /* Note: Not looking at arpcache for mac, just reusing mac->IP from existing queued packet */
+                prepare_ipv4_hdr((sr_ip_hdr_t*)(buf+sizeof(sr_ethernet_hdr_t)),0x00 /* TOS */, len-sizeof(sr_ethernet_hdr_t), 0x0000 /* ID */, IP_DF /* offset */, ip_protocol_icmp /* protocol */, ntohl(if_to_send->ip) /* source */ ,ntohl(ip_hdr->ip_src) /* destination */);
+                prepare_eth_hdr((sr_ethernet_hdr_t*)buf, e_hdr->ether_shost /* destination */, if_to_send->addr /* sender */, ethertype_ip);
+
+                sr_send_packet(sr,buf,len,interface);
+                free(buf);
+
+				fprintf(stderr, "Sent ICMP Port unreachable (type 3, code 3)\n");
+				return;
 			}
-			fprintf(stderr, "TODO: send ICMP destination not reachable(Protocol unreachable error.) Type-3 Code-2\n");
+			/* Send ICMP protocol unreachable error */
+			unsigned int len = sizeof(sr_ethernet_hdr_t)+sizeof(sr_ip_hdr_t)+sizeof(sr_icmp_t3_hdr_t);
+            struct sr_if* if_to_send = sr_get_interface(sr,interface);
+            uint8_t* buf = (uint8_t*)malloc(len);
+            assert(buf);
+
+            prepare_icmp_t3_hdr( (sr_icmp_t3_hdr_t*)( buf+(len-sizeof(sr_icmp_t3_hdr_t)) ), 0x03 /* type */, 0x02/* code */, ip_hdr );
+            /* Note: Not looking at arpcache for mac, just reusing mac->IP from existing queued packet */
+            prepare_ipv4_hdr((sr_ip_hdr_t*)(buf+sizeof(sr_ethernet_hdr_t)),0x00 /* TOS */, len-sizeof(sr_ethernet_hdr_t), 0x0000 /* ID */, IP_DF /* offset */, ip_protocol_icmp /* protocol */, ntohl(if_to_send->ip) /* source */ ,ntohl(ip_hdr->ip_src) /* destination */);
+            prepare_eth_hdr((sr_ethernet_hdr_t*)buf, e_hdr->ether_shost /* destination */, if_to_send->addr /* sender */, ethertype_ip);
+
+            sr_send_packet(sr,buf,len,interface);
+            free(buf);
+
+			fprintf(stderr, "Sent ICMP protocol unreachable error. Type-3 Code-2\n");
 		} else { /* packet is not for router */
 			struct sr_rt* rt_match = sr_get_longest_rt_table_match(sr->routing_table,ip_hdr->ip_dst);
 			if(rt_match) {
@@ -191,11 +219,36 @@ void sr_handlepacket(struct sr_instance* sr,
 						sr_handle_arpreq(sr,req);
 					}
 				} else {
-					fprintf(stderr,"TODO: send ICMP Time exceeded (type 11, code 0)\n");
+					unsigned int len = sizeof(sr_ethernet_hdr_t)+sizeof(sr_ip_hdr_t)+sizeof(sr_icmp_t11_hdr_t);
+	                struct sr_if* if_to_send = sr_get_interface(sr,interface);
+    	            uint8_t* buf = (uint8_t*)malloc(len);
+        	        assert(buf);
+
+	                prepare_icmp_t3_hdr( (sr_icmp_t11_hdr_t*)( buf+(len-sizeof(sr_icmp_t11_hdr_t)) ), 0x0B /* type */, 0x00/* code */, ip_hdr );
+    	            /* Note: Not looking at arpcache for mac, just reusing mac->IP from existing queued packet */
+        	        prepare_ipv4_hdr((sr_ip_hdr_t*)(buf+sizeof(sr_ethernet_hdr_t)),0x00 /* TOS */, len-sizeof(sr_ethernet_hdr_t), 0x0000 /* ID */, IP_DF /* offset */, ip_protocol_icmp /* protocol */, ntohl(if_to_send->ip) /* source */ ,ntohl(ip_hdr->ip_src) /* destination */);
+            	    prepare_eth_hdr((sr_ethernet_hdr_t*)buf, e_hdr->ether_shost /* destination */, if_to_send->addr /* sender */, ethertype_ip);
+
+	                sr_send_packet(sr,buf,len,interface);
+    	            free(buf);
+					fprintf(stderr,"Sent ICMP Time exceeded (type 11, code 0)\n");
 				}
 			}
 			else {
-				fprintf(stderr,"TODO: send ICMP Destination net not reachable(Type-3, Code-0)\n");
+				unsigned int len = sizeof(sr_ethernet_hdr_t)+sizeof(sr_ip_hdr_t)+sizeof(sr_icmp_t3_hdr_t);
+				struct sr_if* if_to_send = sr_get_interface(sr,interface);
+	            uint8_t* buf = (uint8_t*)malloc(len);
+				assert(buf);
+
+				prepare_icmp_t3_hdr( (sr_icmp_t3_hdr_t*)( buf+(len-sizeof(sr_icmp_t3_hdr_t)) ), 0x03 /* type */, 0x00/* code */, ip_hdr );
+				/* Note: Not looking at arpcache for mac, just reusing mac->IP from existing queued packet */
+                prepare_ipv4_hdr((sr_ip_hdr_t*)(buf+sizeof(sr_ethernet_hdr_t)),0x00 /* TOS */, len-sizeof(sr_ethernet_hdr_t), 0x0000 /* ID */, IP_DF /* offset */, ip_protocol_icmp /* protocol */, ntohl(if_to_send->ip) /* source */ ,ntohl(ip_hdr->ip_src) /* destination */);
+                prepare_eth_hdr((sr_ethernet_hdr_t*)buf, e_hdr->ether_shost /* destination */, if_to_send->addr /* sender */, ethertype_ip);
+
+                sr_send_packet(sr,buf,len,interface);
+				free(buf);
+
+				fprintf(stderr,"Sent ICMP Destination net not reachable(Type-3, Code-0)\n");
 			}
 		}
 
@@ -282,4 +335,3 @@ void sr_handlepacket(struct sr_instance* sr,
 		}
     }/* end Handle ARP */
 }/* end sr_ForwardPacket */
-
