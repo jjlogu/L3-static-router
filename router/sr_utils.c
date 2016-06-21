@@ -2,9 +2,7 @@
 #include <stdio.h>
 #include <string.h>
 #include "sr_protocol.h"
-#include "sr_router.h"
 #include "sr_utils.h"
-
 
 uint16_t cksum (const void *_data, int len) {
   const uint8_t *data = _data;
@@ -20,17 +18,85 @@ uint16_t cksum (const void *_data, int len) {
   return sum ? sum : 0xffff;
 }
 
+/*---------------------------------------------------------------------
+ * Utility method's related to processing IP packets. 
+ *---------------------------------------------------------------------*/
+struct sr_ip_hdr *ip_header(uint8_t *buf)
+{
+	return (struct sr_ip_hdr *) (buf + sizeof(struct sr_ethernet_hdr));
+}
 
+/* Returns the header length in bytes. */
+uint8_t ip_ihl(struct sr_ip_hdr *ip_hdr)
+{
+	return ip_hdr->ip_hl * 4;
+}
+
+uint16_t ip_len(struct sr_ip_hdr *ip_hdr)
+{
+	return ntohs(ip_hdr->ip_len);
+}
+
+struct in_addr ip_in_addr(uint32_t ip)
+{
+	struct in_addr inad;
+	
+	inad.s_addr = ip;
+	return inad;
+}
+
+/*---------------------------------------------------------------------
+ * Utility method's related to processing arp packets. 
+ *---------------------------------------------------------------------*/
+struct sr_arp_hdr *arp_header(uint8_t *buf)
+{
+	return (struct sr_arp_hdr *) (buf + sizeof(struct sr_ethernet_hdr));
+} 
+
+uint16_t arp_opcode(struct sr_arp_hdr *arp_hdr) 
+{
+	return ntohs(arp_hdr->ar_op);
+}
+
+uint16_t arp_hrd(struct sr_arp_hdr *arp_hdr) 
+{
+	return ntohs(arp_hdr->ar_hrd);
+}
+
+uint16_t arp_pro(struct sr_arp_hdr *arp_hdr)
+{
+	return ntohs(arp_hdr->ar_pro);
+}
+
+/*---------------------------------------------------------------------
+ * Utility method's related to processing ethernet packets. All take in
+ * raw ethernet packet in network byte order and return host byte order.
+ *---------------------------------------------------------------------*/
 uint16_t ethertype(uint8_t *buf) {
-  sr_ethernet_hdr_t *ehdr = (sr_ethernet_hdr_t *)buf;
+  struct sr_ethernet_hdr *ehdr;
+  
+  ehdr = (struct sr_ethernet_hdr *)buf;
   return ntohs(ehdr->ether_type);
 }
 
 uint8_t ip_protocol(uint8_t *buf) {
-  sr_ip_hdr_t *iphdr = (sr_ip_hdr_t *)(buf);
+  struct sr_ip_hdr *iphdr;
+  
+  iphdr = (struct sr_ip_hdr *)(buf);
   return iphdr->ip_p;
 }
 
+/*---------------------------------------------------------------------
+ * Utility method's related to processing ethernet packets. All take in
+ * raw ethernet packet in network byte order and return host byte order.
+ *---------------------------------------------------------------------*/
+struct sr_icmp_hdr *icmp_header(struct sr_ip_hdr *ip_hdr)
+{
+	uint8_t *icmp_hdr;
+	
+	icmp_hdr = (uint8_t *)(ip_hdr) + ip_ihl(ip_hdr);
+	return (struct sr_icmp_hdr *)icmp_hdr;
+}
 
 /* Prints out formatted Ethernet address, e.g. 00:11:22:33:44:55 */
 void print_addr_eth(uint8_t *addr) {
@@ -116,7 +182,7 @@ void print_hdr_icmp(uint8_t *buf) {
   fprintf(stderr, "\ttype: %d\n", icmp_hdr->icmp_type);
   fprintf(stderr, "\tcode: %d\n", icmp_hdr->icmp_code);
   /* Keep checksum in NBO */
-  fprintf(stderr, "\tchecksum[NBO]: 0x%04X\n", icmp_hdr->icmp_sum);
+  fprintf(stderr, "\tchecksum: %d\n", icmp_hdr->icmp_sum);
 }
 
 
@@ -184,48 +250,3 @@ void print_hdrs(uint8_t *buf, uint32_t length) {
   }
 }
 
-struct sr_if* is_ip_match_router_if(struct sr_instance* sr, uint32_t ip) {
-	struct sr_if* if_walker = sr->if_list;
-	while(if_walker) {
-		if(ip == if_walker->ip)
-			return if_walker;
-		if_walker = if_walker->next;
-	}
-	return if_walker;
-}
-
-void prepare_icmp_t3_hdr(sr_icmp_t3_hdr_t* icmp_hdr, /* Borrowed */
-			 uint8_t icmp_type, uint8_t icmp_code, sr_ip_hdr_t* data) {
-	icmp_hdr->icmp_type	= icmp_type;
-	icmp_hdr->icmp_code	= icmp_code;
-	icmp_hdr->icmp_sum	= 0x0000;
-	icmp_hdr->unused	= 0x0000;
-	icmp_hdr->next_mtu	= 0x0000;
-	memcpy(icmp_hdr->data, data, ICMP_DATA_SIZE);
-	icmp_hdr->icmp_sum	= cksum(icmp_hdr, sizeof(sr_icmp_t3_hdr_t)); /* recalculate checksum */
-}
-
-void prepare_ipv4_hdr(sr_ip_hdr_t* ip_hdr, /* Borrowed */
-			uint8_t ip_tos, uint16_t ip_len, uint16_t ip_id,
-			uint16_t ip_off, uint8_t ip_p, uint32_t ip_src,
-			uint32_t ip_dst) {
-	ip_hdr->ip_v	= 0x4;
-	ip_hdr->ip_hl	= 0x5;
-	ip_hdr->ip_tos	= ip_tos;
-	ip_hdr->ip_len	= htons(ip_len);
-	ip_hdr->ip_id	= htons(ip_id);
-	ip_hdr->ip_off	= htons(ip_off);
-	ip_hdr->ip_ttl	= 0x64;
-	ip_hdr->ip_p	= ip_p;
-	ip_hdr->ip_src	= htonl(ip_src);
-	ip_hdr->ip_dst	= htonl(ip_dst); 
-	ip_hdr->ip_sum	= 0x0000;
-	ip_hdr->ip_sum = cksum(ip_hdr,ip_hdr->ip_hl*4); /* recalculate checksum */
-}
-void prepare_eth_hdr(sr_ethernet_hdr_t* eth_hdr,/* Borrowed */
-					uint8_t* ether_dhost, uint8_t* ether_shost,
-					uint16_t ether_type) {
-	memcpy(eth_hdr->ether_dhost,ether_dhost,ETHER_ADDR_LEN);
-	memcpy(eth_hdr->ether_shost,ether_shost,ETHER_ADDR_LEN);
-	eth_hdr->ether_type = htons(ether_type);
-}

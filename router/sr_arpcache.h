@@ -106,6 +106,12 @@ struct sr_arpcache {
     pthread_mutexattr_t attr;
 };
 
+/* Sends an arp request if necessary. */
+void sr_arpreq_handle(struct sr_instance *sr, struct sr_arpreq *req);
+
+/* Sends all queued packets waiting on a request. */
+void sr_arpreq_send_packets(struct sr_instance *sr, struct sr_arpreq *req);
+
 /* Checks if an IP->MAC mapping is in the cache. IP is in network byte order. 
    You must free the returned structure if it is not NULL. */
 struct sr_arpentry *sr_arpcache_lookup(struct sr_arpcache *cache, uint32_t ip);
@@ -146,7 +152,5 @@ void sr_arpcache_dump(struct sr_arpcache *cache);
 int   sr_arpcache_init(struct sr_arpcache *cache);
 int   sr_arpcache_destroy(struct sr_arpcache *cache);
 void *sr_arpcache_timeout(void *cache_ptr);
-void sr_handle_arpreq(struct sr_instance* sr /* borrowed */, struct sr_arpreq* req /* borrowed */);
-
 
 #endif

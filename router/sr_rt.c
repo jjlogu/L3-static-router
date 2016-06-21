@@ -21,7 +21,6 @@
 
 #include "sr_rt.h"
 #include "sr_router.h"
-#include "sr_utils.h"
 
 /*---------------------------------------------------------------------
  * Method:
@@ -178,15 +177,35 @@ void sr_print_routing_entry(struct sr_rt* entry)
 
 } /* -- sr_print_routing_entry -- */
 
-/*
-	Search through the routing table for longest IP match
-*/
-struct sr_rt* sr_get_longest_rt_table_match(struct sr_rt* rt_walker,in_addr_t ip) {
-	fprintf(stderr,"TODO: implement longest prefix\n");
-	while(rt_walker) {
-		if(rt_walker->dest.s_addr == ip)
-			return rt_walker;
-		rt_walker = rt_walker->next;
+/*---------------------------------------------------------------------
+ * Method:sr_longest_prefix_match(struct sr_instance* sr, struct in_addr)
+ *
+ * Look up the longest prefix match in the routing table. Return the 
+ * associated struct sr_rt.
+ *---------------------------------------------------------------------*/
+struct sr_rt *sr_longest_prefix_match(struct sr_instance* sr, struct in_addr addr)
+{
+	struct sr_rt* cur;
+	struct sr_rt* lpm;
+	unsigned long lpm_len;
+	
+	cur = sr->routing_table;
+	lpm_len = 0;
+	lpm = 0;
+	
+	/* Iterate through the interfaces and compare the masked addresses. If they are equal
+	 * then we found a match. We know it is longest if the netmask we used is greater
+	 * than the one used for the previous match. */
+	while(cur != 0) {
+		if (((cur->dest.s_addr & cur->mask.s_addr) == (addr.s_addr & cur->mask.s_addr)) &&
+			  (lpm_len <= cur->mask.s_addr)) {
+			  
+			lpm_len = cur->mask.s_addr;
+			lpm = cur;
+		}
+		
+		cur = cur->next;
 	}
-	return rt_walker;
+	
+	return lpm;
 }

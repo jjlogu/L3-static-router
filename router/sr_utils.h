@@ -28,10 +28,28 @@
 #ifndef SR_UTILS_H
 #define SR_UTILS_H
 
+#include "sr_protocol.h"
+
 uint16_t cksum(const void *_data, int len);
 
+/* Ethernet utility methods */
 uint16_t ethertype(uint8_t *buf);
 uint8_t ip_protocol(uint8_t *buf);
+
+/* IP utility methods */
+struct sr_ip_hdr *ip_header(uint8_t *buf);
+uint8_t ip_ihl(struct sr_ip_hdr *ip_hdr);
+uint16_t ip_len(struct sr_ip_hdr *ip_hdr);
+struct in_addr ip_in_addr(uint32_t ip);
+
+/* ARP utility methods */
+struct sr_arp_hdr *arp_header(uint8_t *buf);
+uint16_t arp_opcode(struct sr_arp_hdr *arp_hdr);
+uint16_t arp_hrd(struct sr_arp_hdr *arp_hdr);
+uint16_t arp_pro(struct sr_arp_hdr *arp_hdr);
+
+/* ICMP utility methods */
+struct sr_icmp_hdr *icmp_header(struct sr_ip_hdr *ip_hdr);
 
 void print_addr_eth(uint8_t *addr);
 void print_addr_ip(struct in_addr address);
@@ -45,22 +63,4 @@ void print_hdr_arp(uint8_t *buf);
 /* prints all headers, starting from eth */
 void print_hdrs(uint8_t *buf, uint32_t length);
 
-/*
-    This function will check whether give ip matched any of router's interface ip.
-    If match:
-        return pointer to interface
-    else:
-        return null
-*/
-struct sr_if* is_ip_match_router_if(struct sr_instance* sr, uint32_t ip);
-
-void prepare_icmp_t3_hdr(sr_icmp_t3_hdr_t* icmp_hdr, /* Borrowed */
-             uint8_t icmp_type, uint8_t icmp_code, sr_ip_hdr_t* data);
-void prepare_ipv4_hdr(sr_ip_hdr_t* ip_hdr, /* Borrowed */
-            uint8_t ip_tos, uint16_t ip_len, uint16_t ip_id,
-            uint16_t ip_off, uint8_t ip_p, uint32_t ip_src,
-            uint32_t ip_dst);
-void prepare_eth_hdr(sr_ethernet_hdr_t* eth_hdr,/* Borrowed */
-                    uint8_t* ether_dhost, uint8_t* ether_shost,
-                    uint16_t ether_type);
 #endif /* -- SR_UTILS_H -- */

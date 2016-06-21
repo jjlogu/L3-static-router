@@ -76,34 +76,16 @@
 #endif
 #define ICMP_DATA_SIZE 28
 
-
 /* Structure of a ICMP header
  */
 struct sr_icmp_hdr {
   uint8_t icmp_type;
   uint8_t icmp_code;
   uint16_t icmp_sum;
-  
+  uint32_t unused;			/* This field's use differs between ICMP message types, and is not 
+  												 needed in this lab. */
 } __attribute__ ((packed)) ;
 typedef struct sr_icmp_hdr sr_icmp_hdr_t;
-
-
-/* Structure of a type3 ICMP header
- */
-struct sr_icmp_t3_hdr {
-  uint8_t icmp_type;
-  uint8_t icmp_code;
-  uint16_t icmp_sum;
-  uint16_t unused;
-  uint16_t next_mtu;
-  uint8_t data[ICMP_DATA_SIZE];
-
-} __attribute__ ((packed)) ;
-typedef struct sr_icmp_t3_hdr sr_icmp_t3_hdr_t;
-typedef struct sr_icmp_t3_hdr sr_icmp_t11_hdr_t;
-
-
-
 
 /*
  * Structure of an internet header, naked of options.
@@ -149,19 +131,14 @@ struct sr_ethernet_hdr
 } __attribute__ ((packed)) ;
 typedef struct sr_ethernet_hdr sr_ethernet_hdr_t;
 
-
-
 enum sr_ip_protocol {
   ip_protocol_icmp = 0x0001,
-  ip_protocol_tcp = 0x0006,
-  ip_protocol_udp = 0x0011
 };
 
 enum sr_ethertype {
   ethertype_arp = 0x0806,
   ethertype_ip = 0x0800,
 };
-
 
 enum sr_arp_opcode {
   arp_op_request = 0x0001,
@@ -172,6 +149,13 @@ enum sr_arp_hrd_fmt {
   arp_hrd_ethernet = 0x0001,
 };
 
+enum sr_arp_pro_fmt {
+	arp_pro_ip = 0x0800,
+};
+
+enum ip_version {
+	ip_version_4 = 4,
+};
 
 struct sr_arp_hdr
 {
@@ -188,5 +172,6 @@ struct sr_arp_hdr
 typedef struct sr_arp_hdr sr_arp_hdr_t;
 
 #define sr_IFACE_NAMELEN 32
+#define BROADCAST_IP 4294967295
 
 #endif /* -- SR_PROTOCOL_H -- */
