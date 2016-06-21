@@ -26,6 +26,13 @@
 /*---------------------------------------------------------------------
  * Definitions
  *---------------------------------------------------------------------*/
+ 
+ enum sr_nat_transit_type {
+	transit_type_outgoing,
+	transit_type_incoming,
+	transit_type_other
+};
+
 #define MIN_IP_HDR_LEN 20 
 #define MAX_IP_HDR_LEN 60
 #define DEFAULT_TTL 64
@@ -39,6 +46,7 @@
 #define ICMP_NET_CODE 0
 #define ICMP_PORT_CODE 3
 #define ICMP_TIME_EXCEEDED_TYPE 11
+
 /*---------------------------------------------------------------------
  * Internal Function Prototypes
  *---------------------------------------------------------------------*/
@@ -62,6 +70,10 @@ int valid_ip(uint8_t *packet, unsigned int len);
 int valid_icmp(struct sr_ip_hdr *ip_hdr);
 int ping_address_match(uint32_t dip);
 void forward_ip_pkt(struct sr_instance* sr, struct sr_ip_hdr *ip_hdr);
+int translate_pkt(struct sr_instance* sr, uint8_t* packet, char* interface);
+enum sr_nat_transit_type transit_type(struct sr_instance *sr, struct sr_ip_hdr *ip_hdr, char* interface);
+uint16_t get_transition(struct sr_tcp_hdr *tcp_hdr, enum sr_nat_transit_type type);
+uint16_t tcp_cksum(struct sr_ip_hdr *ip_hdr, struct sr_tcp_hdr *tcp_hdr);
 
 /*---------------------------------------------------------------------
  * Method: sr_init(void)
@@ -86,6 +98,10 @@ void sr_init(struct sr_instance* sr)
     pthread_t thread;
 
     pthread_create(&thread, &(sr->attr), sr_arpcache_timeout, sr);
+    
+    /* Initialize nat. */
+    if (sr->nat)
+	    sr_nat_init(sr, &sr->nat_cache);
 } /* -- sr_init -- */
 
 /*---------------------------------------------------------------------
@@ -108,7 +124,6 @@ void sr_handlepacket(struct sr_instance* sr,
         unsigned int len,
         char* interface/* lent */)
 {
-
   /* REQUIRES */
   assert(sr);
   assert(packet);
@@ -119,7 +134,7 @@ void sr_handlepacket(struct sr_instance* sr,
 	/* Ensure that the length is at least enough for an ethernet header */
 	if (len < sizeof(struct sr_ethernet_hdr))
 		return;
-
+	
   /* Handle ARP packet */
 	if (ethertype(packet) == ethertype_arp) {
 		process_arp(sr, packet, len, interface);
@@ -156,10 +171,11 @@ void sr_send_icmp(struct sr_instance* sr, uint8_t *packet, unsigned int len,
 	/* Destination unreachable message or TTL exceeded. */
 	if (type == ICMP_UNREACHABLE_TYPE || type == ICMP_TIME_EXCEEDED_TYPE) {
 	
-		/* Update icmp header fields. */
+		/* Update icmp header fields. Note: seq and id and unused fields. */
 		icmp_hdr.icmp_type = type;
 		icmp_hdr.icmp_code = code;
-		icmp_hdr.unused = 0;
+		icmp_hdr.icmp_seq = 0;
+		icmp_hdr.icmp_id = 0;
 		icmp_hdr.icmp_sum = 0;
 		
 		/* Update the IP header fields. */
@@ -428,6 +444,14 @@ void process_ip(struct sr_instance* sr,
 	if (!valid_ip(packet, len))
 		return;
 	
+	/* If we are functioning as a nat, translate packet. */
+	if (sr->nat) {
+	
+		/* Translate the packet. On failure return and drop the packet. */
+		if (!translate_pkt(sr, packet, interface))
+			return;
+	}
+	
 	/* Is it destined for me?! */
 	ip_hdr = ip_header(packet);
 	if (sr_interface_ip_match(sr, ip_hdr->ip_dst)) {
@@ -603,4 +627,235 @@ void forward_ip_pkt(struct sr_instance* sr, struct sr_ip_hdr *ip_hdr)
 	memcpy(fwd_ip_pkt, ip_hdr, len);
 	sr_encap_and_send_pkt(sr, fwd_ip_pkt, len, ip_hdr->ip_dst, 1, ethertype_ip);
 	free(fwd_ip_pkt);
+}
+
+/*---------------------------------------------------------------------
+ * Method: translate_pkt(struct sr_instance* sr, uint8_t* packet, char* interface)
+ * Scope:  Internal
+ *
+ * Translate an incoming ip packet. The packet is a raw ethernet frame
+ * with a valid IP header. Returns 1 if successful, 0 otherwise. 
+ *
+ *---------------------------------------------------------------------*/
+int translate_pkt(struct sr_instance* sr, uint8_t* packet, char* interface)
+{
+	struct sr_ip_hdr *ip_hdr;
+	struct sr_nat_mapping *mapping;
+	enum sr_nat_mapping_type map_type;
+	enum sr_nat_transit_type type;
+	struct sr_nat_tcp_aux;
+	struct sr_tcp_hdr *tcp_hdr = NULL;
+	struct sr_icmp_hdr *icmp_hdr = NULL;
+	uint16_t aux;
+	sr_nat_tcp_aux *tcp_info = NULL;
+	struct sr_if *external_interface;
+	
+	ip_hdr = ip_header(packet);
+	
+	/* ICMP packet. */
+	if (ip_hdr->ip_p == ip_protocol_icmp) {
+		map_type = nat_mapping_icmp;
+		icmp_hdr = icmp_header(ip_hdr);
+	
+	/* TCP packet. */	
+	} else if (ip_hdr->ip_p == ip_protocol_tcp) {
+		map_type = nat_mapping_tcp;
+		tcp_hdr = tcp_header(ip_hdr);
+	
+	/* Drop if the packet is not ICMP or TCP. */
+	} else {
+		return 0;
+	}
+	
+	/* Outgoing packet. */
+	type = transit_type(sr, ip_hdr, interface);
+	if (type == transit_type_outgoing) {
+	
+		/* Look up or create mapping. */
+		if (map_type == nat_mapping_icmp) {
+			aux = icmp_hdr->icmp_id;
+		
+		} else {
+			aux = tcp_hdr->tcp_srcp;
+			tcp_info = (sr_nat_tcp_aux *)malloc(sizeof(sr_nat_tcp_aux));
+			tcp_info->transition = get_transition(tcp_hdr, type);
+			tcp_info->ip_dst = ip_hdr->ip_dst; 
+			tcp_info->port_dst = tcp_hdr->tcp_dstp;
+			tcp_info->seqno = tcp_hdr->tcp_seqno;
+			tcp_info->ackno = tcp_hdr->tcp_ackno;
+		}
+		
+		mapping = sr_nat_lookup_internal(&sr->nat_cache, 
+																		 ip_hdr->ip_src, 
+																		 aux, 
+																		 map_type, 
+																		 tcp_info);
+		
+		/* No mapping exists. Insert. */
+  
+		if (!mapping) {
+			external_interface = sr_get_interface(sr, EXTERNAL_INTERFACE);
+			mapping = sr_nat_insert_mapping(&sr->nat_cache, 
+																			ip_hdr->ip_src, 
+																			external_interface->ip, 
+																			aux, 
+																			map_type, 
+																			tcp_info);
+		}
+		
+		/* Rewrite IP source */
+		ip_hdr->ip_src = mapping->ip_ext;
+		ip_hdr->ip_sum = 0;
+		ip_hdr->ip_sum = cksum(ip_hdr, ip_ihl(ip_hdr));
+		
+		/* Rewrite ID for ICMP. */
+		if (map_type == nat_mapping_icmp) {
+			icmp_hdr->icmp_id = mapping->aux_ext;
+			icmp_hdr->icmp_sum = 0;
+			icmp_hdr->icmp_sum = cksum(icmp_hdr, ip_len(ip_hdr) - ICMP_IP_HDR_LEN_BYTES);
+		
+		/* Rewrite source port for TCP. */	
+		} else {
+			tcp_hdr->tcp_srcp = mapping->aux_ext;
+			tcp_hdr->tcp_sum = 0;
+			tcp_hdr->tcp_sum = tcp_cksum(ip_hdr, tcp_hdr);
+		}
+	
+	/* External to internal packet. */
+	} else if (type == transit_type_incoming) {
+	
+		if (map_type == nat_mapping_icmp) {
+			aux = icmp_hdr->icmp_id;
+		
+		/* Look up mapping. */
+		} else {
+			aux = tcp_hdr->tcp_dstp;
+			tcp_info = (sr_nat_tcp_aux *)malloc(sizeof(sr_nat_tcp_aux));
+			tcp_info->transition = get_transition(tcp_hdr, type);
+			tcp_info->ip_dst = ip_hdr->ip_src; 
+			tcp_info->port_dst = tcp_hdr->tcp_srcp;
+			tcp_info->seqno = tcp_hdr->tcp_seqno;
+			tcp_info->ackno = tcp_hdr->tcp_ackno;
+		}
+	
+		mapping = sr_nat_lookup_external(&sr->nat_cache, aux, map_type, tcp_info);
+		if (!mapping)
+			return 0;
+
+		/* Rewrite IP destination. */
+		ip_hdr->ip_dst = mapping->ip_int;
+		ip_hdr->ip_sum = 0;
+		ip_hdr->ip_sum = cksum(ip_hdr, ip_ihl(ip_hdr));
+		
+		/* Rewrite ID for ICMP. */
+		if (map_type == nat_mapping_icmp) {
+			icmp_hdr->icmp_id = mapping->aux_int;
+			icmp_hdr->icmp_sum = 0;
+			icmp_hdr->icmp_sum = cksum(icmp_hdr, ip_len(ip_hdr) - ICMP_IP_HDR_LEN_BYTES);
+		
+		/* Rewrite destination port for TCP. */	
+		} else {
+			tcp_hdr->tcp_dstp = mapping->aux_int;
+			tcp_hdr->tcp_sum = 0;
+			tcp_hdr->tcp_sum = tcp_cksum(ip_hdr, tcp_hdr);
+		}
+		
+	/* Just return the original packet, no translation necessary. */
+	} else {
+		return 1;
+	}
+
+	/* Clean up memory allocations. */
+	free(mapping);
+	if (tcp_info)
+		free(tcp_info);
+	return 1;
+}
+
+enum sr_nat_transit_type transit_type(struct sr_instance *sr, struct sr_ip_hdr *ip_hdr, char* interface)
+{
+	struct sr_rt *rt;
+	
+	/* Get destination. */
+	rt = sr_longest_prefix_match(sr, ip_in_addr(ip_hdr->ip_dst));
+	
+	/* If the destination is not in the routing table, don't translate and let the 
+	   router take care of it. */
+	if (!rt)
+		return transit_type_other;
+	
+	/* Internal to Internal. */
+	if (0 == strncmp(interface, INTERNAL_INTERFACE, INTERFACE_NAME_LEN) &&
+		  0 == strncmp(rt->interface, INTERNAL_INTERFACE, INTERFACE_NAME_LEN))
+		  return transit_type_other;
+	
+	/* External to External. */
+	if (0 == strncmp(interface, EXTERNAL_INTERFACE, INTERFACE_NAME_LEN) &&
+		  0 == strncmp(rt->interface, EXTERNAL_INTERFACE, INTERFACE_NAME_LEN))
+		  return transit_type_other;
+	
+	/* Outgoing */
+	if (0 == strncmp(interface, INTERNAL_INTERFACE, INTERFACE_NAME_LEN) &&
+		  0 == strncmp(rt->interface, EXTERNAL_INTERFACE, INTERFACE_NAME_LEN))
+		  return transit_type_outgoing;
+	
+	/* Outgoing */
+	if (0 == strncmp(interface, EXTERNAL_INTERFACE, INTERFACE_NAME_LEN) &&
+		  0 == strncmp(rt->interface, INTERNAL_INTERFACE, INTERFACE_NAME_LEN))
+		  return transit_type_incoming;
+	
+	return transit_type_other;
+}
+
+/* Returns a bit map with information about the type of tcp packet. */
+uint16_t get_transition(struct sr_tcp_hdr *tcp_hdr, enum sr_nat_transit_type type) {
+	uint16_t trans = 0;
+	
+	/* The tcp header is something we are sending. */
+	if (type == transit_type_outgoing) {
+	
+		if (tcp_hdr->tcp_control & TCP_ACK)
+			trans |= SEND_ACK;
+		
+		if (tcp_hdr->tcp_control & TCP_SYN)
+			trans |= SEND_SYN;
+		
+		if (tcp_hdr->tcp_control & TCP_FIN)
+			trans |= SEND_FIN;
+		
+	/* The tcp header is something we are receiving. */
+	} else if (type == transit_type_incoming) {
+		if (tcp_hdr->tcp_control & TCP_ACK)
+			trans |= RECEIVE_ACK;
+		
+		if (tcp_hdr->tcp_control & TCP_SYN)
+			trans |= RECEIVE_SYN;
+		
+		if (tcp_hdr->tcp_control & TCP_FIN)
+			trans |= RECEIVE_FIN;
+	}
+
+	return trans;
+}
+
+uint16_t tcp_cksum(struct sr_ip_hdr *ip_hdr, struct sr_tcp_hdr *tcp_hdr) {
+	struct sr_pseudo_ip_hdr pseudo_ip_hdr;
+	uint8_t *packet;
+	int total_len;
+	int tcp_len;
+	uint16_t sum;
+	
+	tcp_len = ip_len(ip_hdr) - ip_ihl(ip_hdr);
+	total_len = sizeof(struct sr_pseudo_ip_hdr) + tcp_len;
+	pseudo_ip_hdr.ip_src = ip_hdr->ip_src;
+	pseudo_ip_hdr.ip_dst = ip_hdr->ip_dst;
+	pseudo_ip_hdr.zero = 0;
+	pseudo_ip_hdr.ip_p = ip_hdr->ip_p;
+	pseudo_ip_hdr.ip_len = htons(tcp_len);
+	packet = malloc(total_len);
+	memcpy(packet, &pseudo_ip_hdr, sizeof(struct sr_pseudo_ip_hdr));
+	memcpy(packet + sizeof(struct sr_pseudo_ip_hdr), tcp_hdr, tcp_len);
+	sum = cksum(packet, total_len);
+	free(packet);
+	return sum;
 }

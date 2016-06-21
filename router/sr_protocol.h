@@ -76,16 +76,39 @@
 #endif
 #define ICMP_DATA_SIZE 28
 
-/* Structure of a ICMP header
+#define TCP_ACK 0x1000
+#define TCP_SYN 0x200
+#define TCP_FIN 0x100
+
+/* 
+ * Structure of a ICMP header
  */
 struct sr_icmp_hdr {
   uint8_t icmp_type;
   uint8_t icmp_code;
   uint16_t icmp_sum;
-  uint32_t unused;			/* This field's use differs between ICMP message types, and is not 
-  												 needed in this lab. */
+  uint16_t icmp_id;
+  uint16_t icmp_seq;
 } __attribute__ ((packed)) ;
 typedef struct sr_icmp_hdr sr_icmp_hdr_t;
+
+/*
+ * Structure of an internet header, naked of options.
+ */
+struct sr_tcp_hdr
+{
+	uint16_t tcp_srcp;				/* Source port number. */
+	uint16_t tcp_dstp;				/* Destination port number. */
+	uint32_t tcp_seqno;				/* Sequence number. */
+	uint32_t tcp_ackno;				/* Ack number. */
+	uint16_t tcp_control;			/* Control Note: this is not the actual struct, 
+  													 * but all we need for this lab. */
+	uint16_t tcp_wind;				/* Window */
+	uint16_t tcp_sum;					/* Checksum */
+	uint16_t tcp_up;					/* Urgent pointer */
+	uint32_t tcp_opt;					/* Options and padding */
+} __attribute__ ((packed)) ;
+typedef struct sr_tcp_hdr sr_tcp_hdr;
 
 /*
  * Structure of an internet header, naked of options.
@@ -116,6 +139,18 @@ struct sr_ip_hdr
   } __attribute__ ((packed)) ;
 typedef struct sr_ip_hdr sr_ip_hdr_t;
 
+/*
+ * Structure of an internet header, naked of options.
+ */
+struct sr_pseudo_ip_hdr
+  {
+	uint32_t ip_src, ip_dst;	/* source and dest address */
+	uint8_t zero; 						/* Zeroed out field. */
+	uint8_t ip_p;							/* protocol */
+  uint16_t ip_len;					/* TCP length */
+  } __attribute__ ((packed)) ;
+typedef struct sr_pseudo_ip_hdr sr_pseudo_ip_hdr;
+
 /* 
  *  Ethernet packet header prototype.  Too many O/S's define this differently.
  *  Easy enough to solve that and define it here.
@@ -132,7 +167,8 @@ struct sr_ethernet_hdr
 typedef struct sr_ethernet_hdr sr_ethernet_hdr_t;
 
 enum sr_ip_protocol {
-  ip_protocol_icmp = 0x0001,
+  ip_protocol_icmp = 1,
+  ip_protocol_tcp = 6
 };
 
 enum sr_ethertype {

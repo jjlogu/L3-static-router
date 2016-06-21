@@ -51,6 +51,9 @@ uint16_t arp_pro(struct sr_arp_hdr *arp_hdr);
 /* ICMP utility methods */
 struct sr_icmp_hdr *icmp_header(struct sr_ip_hdr *ip_hdr);
 
+/* TCP utility methods */
+struct sr_tcp_hdr *tcp_header(struct sr_ip_hdr *ip_hdr);
+
 void print_addr_eth(uint8_t *addr);
 void print_addr_ip(struct in_addr address);
 void print_addr_ip_int(uint32_t ip);
@@ -59,6 +62,7 @@ void print_hdr_eth(uint8_t *buf);
 void print_hdr_ip(uint8_t *buf);
 void print_hdr_icmp(uint8_t *buf);
 void print_hdr_arp(uint8_t *buf);
+void print_hdr_tcp(uint8_t *buf);
 
 /* prints all headers, starting from eth */
 void print_hdrs(uint8_t *buf, uint32_t length);

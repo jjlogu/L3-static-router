@@ -87,7 +87,7 @@ uint8_t ip_protocol(uint8_t *buf) {
 }
 
 /*---------------------------------------------------------------------
- * Utility method's related to processing ethernet packets. All take in
+ * Utility method's related to processing icmp packets. All take in
  * raw ethernet packet in network byte order and return host byte order.
  *---------------------------------------------------------------------*/
 struct sr_icmp_hdr *icmp_header(struct sr_ip_hdr *ip_hdr)
@@ -96,6 +96,18 @@ struct sr_icmp_hdr *icmp_header(struct sr_ip_hdr *ip_hdr)
 	
 	icmp_hdr = (uint8_t *)(ip_hdr) + ip_ihl(ip_hdr);
 	return (struct sr_icmp_hdr *)icmp_hdr;
+}
+
+/*---------------------------------------------------------------------
+ * Utility method's related to processing tcp packets. All take in
+ * raw ethernet packet in network byte order and return host byte order.
+ *---------------------------------------------------------------------*/
+struct sr_tcp_hdr *tcp_header(struct sr_ip_hdr *ip_hdr)
+{
+	uint8_t *tcp_hdr;
+	
+	tcp_hdr = (uint8_t *)(ip_hdr) + ip_ihl(ip_hdr);
+	return (struct sr_tcp_hdr *)tcp_hdr;
 }
 
 /* Prints out formatted Ethernet address, e.g. 00:11:22:33:44:55 */
@@ -185,6 +197,18 @@ void print_hdr_icmp(uint8_t *buf) {
   fprintf(stderr, "\tchecksum: %d\n", icmp_hdr->icmp_sum);
 }
 
+void print_hdr_tcp(uint8_t *buf) {
+	struct sr_tcp_hdr *tcp_hdr = (struct sr_tcp_hdr *)buf;
+	fprintf(stderr, "TCP header:\n");
+  fprintf(stderr, "src port: %d \n", ntohs(tcp_hdr->tcp_srcp));
+  fprintf(stderr, "dst port: %d \n", ntohs(tcp_hdr->tcp_dstp));
+  fprintf(stderr, "seqno: %u \n", ntohl(tcp_hdr->tcp_seqno));
+  fprintf(stderr, "ackno: %u \n", ntohl(tcp_hdr->tcp_ackno));
+  fprintf(stderr, "control: %u \n", tcp_hdr->tcp_control);
+  /* Keep checksum in NBO */
+  fprintf(stderr, "tchecksum: %d \n", tcp_hdr->tcp_sum);
+}
+
 
 /* Prints out fields in ARP header */
 void print_hdr_arp(uint8_t *buf) {
@@ -236,6 +260,10 @@ void print_hdrs(uint8_t *buf, uint32_t length) {
         fprintf(stderr, "Failed to print ICMP header, insufficient length\n");
       else
         print_hdr_icmp(buf + sizeof(sr_ethernet_hdr_t) + sizeof(sr_ip_hdr_t));
+    }
+    
+    if (ip_proto == ip_protocol_tcp) { /* TCP */
+    	print_hdr_tcp(buf + sizeof(sr_ethernet_hdr_t) + sizeof(sr_ip_hdr_t));
     }
   }
   else if (ethtype == ethertype_arp) { /* ARP */
