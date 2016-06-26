@@ -34,9 +34,6 @@ struct sr_instance;
  * Node in the interface list for each router
  *
  * -------------------------------------------------------------------------- */
-#define INTERNAL_INTERFACE "eth1"
-#define EXTERNAL_INTERFACE "eth2"
-#define INTERFACE_NAME_LEN 4
 
 struct sr_if
 {
@@ -48,7 +45,6 @@ struct sr_if
 };
 
 struct sr_if* sr_get_interface(struct sr_instance* sr, const char* name);
-int sr_interface_ip_match(struct sr_instance* sr, uint32_t dip);
 void sr_add_interface(struct sr_instance*, const char*);
 void sr_set_ether_addr(struct sr_instance*, const unsigned char*);
 void sr_set_ether_ip(struct sr_instance*, uint32_t ip_nbo);
