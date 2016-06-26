@@ -16,6 +16,10 @@
 #include "sr_protocol.h"
 #include "sr_arpcache.h"
 
+#ifndef _DEBUG_
+#define _DEBUG_
+#endif /* enable debug */
+
 /* we dont like this debug , but what to do for varargs ? */
 #ifdef _DEBUG_
 #define Debug(x, args...) printf(x, ## args)

@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <string.h>
 #include "sr_protocol.h"
+#include "sr_router.h"
 #include "sr_utils.h"
 
 
@@ -115,7 +116,7 @@ void print_hdr_icmp(uint8_t *buf) {
   fprintf(stderr, "\ttype: %d\n", icmp_hdr->icmp_type);
   fprintf(stderr, "\tcode: %d\n", icmp_hdr->icmp_code);
   /* Keep checksum in NBO */
-  fprintf(stderr, "\tchecksum: %d\n", icmp_hdr->icmp_sum);
+  fprintf(stderr, "\tchecksum[NBO]: 0x%04X\n", icmp_hdr->icmp_sum);
 }
 
 
@@ -183,3 +184,48 @@ void print_hdrs(uint8_t *buf, uint32_t length) {
   }
 }
 
+struct sr_if* is_ip_match_router_if(struct sr_instance* sr, uint32_t ip) {
+	struct sr_if* if_walker = sr->if_list;
+	while(if_walker) {
+		if(ip == if_walker->ip)
+			return if_walker;
+		if_walker = if_walker->next;
+	}
+	return if_walker;
+}
+
+void prepare_icmp_t3_hdr(sr_icmp_t3_hdr_t* icmp_hdr, /* Borrowed */
+			 uint8_t icmp_type, uint8_t icmp_code, sr_ip_hdr_t* data) {
+	icmp_hdr->icmp_type	= icmp_type;
+	icmp_hdr->icmp_code	= icmp_code;
+	icmp_hdr->icmp_sum	= 0x0000;
+	icmp_hdr->unused	= 0x0000;
+	icmp_hdr->next_mtu	= 0x0000;
+	memcpy(icmp_hdr->data, data, ICMP_DATA_SIZE);
+	icmp_hdr->icmp_sum	= cksum(icmp_hdr, sizeof(sr_icmp_t3_hdr_t)); /* recalculate checksum */
+}
+
+void prepare_ipv4_hdr(sr_ip_hdr_t* ip_hdr, /* Borrowed */
+			uint8_t ip_tos, uint16_t ip_len, uint16_t ip_id,
+			uint16_t ip_off, uint8_t ip_p, uint32_t ip_src,
+			uint32_t ip_dst) {
+	ip_hdr->ip_v	= 0x4;
+	ip_hdr->ip_hl	= 0x5;
+	ip_hdr->ip_tos	= ip_tos;
+	ip_hdr->ip_len	= htons(ip_len);
+	ip_hdr->ip_id	= htons(ip_id);
+	ip_hdr->ip_off	= htons(ip_off);
+	ip_hdr->ip_ttl	= 0x64;
+	ip_hdr->ip_p	= ip_p;
+	ip_hdr->ip_src	= htonl(ip_src);
+	ip_hdr->ip_dst	= htonl(ip_dst); 
+	ip_hdr->ip_sum	= 0x0000;
+	ip_hdr->ip_sum = cksum(ip_hdr,ip_hdr->ip_hl*4); /* recalculate checksum */
+}
+void prepare_eth_hdr(sr_ethernet_hdr_t* eth_hdr,/* Borrowed */
+					uint8_t* ether_dhost, uint8_t* ether_shost,
+					uint16_t ether_type) {
+	memcpy(eth_hdr->ether_dhost,ether_dhost,ETHER_ADDR_LEN);
+	memcpy(eth_hdr->ether_shost,ether_shost,ETHER_ADDR_LEN);
+	eth_hdr->ether_type = htons(ether_type);
+}
